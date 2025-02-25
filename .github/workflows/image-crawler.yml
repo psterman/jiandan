@@ -2,7 +2,7 @@ name: Image Crawler
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天午夜运行
+    - cron: '0 1 * * *'  # 每天凌晨1点运行（UTC时间），相当于北京时间早上9点
   workflow_dispatch:      # 允许手动触发
 
 jobs:
@@ -12,8 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
         with:
-          fetch-depth: 0  # 获取完整历史记录以正确处理文件夹编号
-          token: ${{ secrets.GITHUB_TOKEN }}  # 使用仓库密钥
+          fetch-depth: 0  # 获取完整历史记录
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -32,6 +32,6 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add [0-9][0-9][0-9]/
-          git commit -m "Add new images $(date +'%Y-%m-%d')" || exit 0
+          git add [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/  # 匹配日期格式的文件夹
+          git commit -m "Add images for $(date -d 'yesterday' +'%Y-%m-%d')" || exit 0
           git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git 

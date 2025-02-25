@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import time
+from datetime import datetime, timedelta
 import re
 
 class ImageCrawler:
@@ -18,29 +19,15 @@ class ImageCrawler:
             'Referer': 'https://jandan.net/'
         }
         self.image_count = 0
-        self.current_folder = None
+        # 获取昨天的日期
+        self.yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+        self.current_folder = self.yesterday
         
-    def get_next_folder_name(self):
-        """获取下一个文件夹名称"""
-        existing_folders = [d for d in os.listdir() if os.path.isdir(d) and d.isdigit()]
-        if not existing_folders:
-            return "001"
-        max_folder = max(existing_folders)
-        next_num = int(max_folder) + 1
-        return f"{next_num:03d}"
-        
-    def get_current_folder(self):
-        """获取或创建当前文件夹"""
-        if self.current_folder is None or len(os.listdir(self.current_folder)) >= 1000:
-            self.current_folder = self.create_new_folder()
+    def create_folder(self):
+        """创建日期文件夹"""
+        os.makedirs(self.current_folder, exist_ok=True)
+        print(f"使用文件夹: {self.current_folder}")
         return self.current_folder
-        
-    def create_new_folder(self):
-        """创建新文件夹"""
-        folder_name = self.get_next_folder_name()
-        os.makedirs(folder_name, exist_ok=True)
-        print(f"创建新文件夹: {folder_name}")
-        return folder_name
         
     def download_image(self, url):
         """下载并保存图片"""
@@ -67,8 +54,7 @@ class ImageCrawler:
                 
                 # 生成文件名
                 filename = f'{int(time.time())}_{self.image_count}.jpg'
-                folder = self.get_current_folder()
-                save_path = os.path.join(folder, filename)
+                save_path = os.path.join(self.current_folder, filename)
                 
                 # 保存图片
                 img.save(save_path, 'JPEG')
@@ -81,46 +67,56 @@ class ImageCrawler:
         return False
         
     def get_page_range(self):
-        """获取当天的页面范围"""
+        """获取指定日期的页面范围"""
         try:
+            # 构造日期编码（例如：MjAyNTAyMjU-）
+            date_code = f"MjAyNTAyMjU"  # 这里需要根据实际日期格式调整
+            
             # 先访问主页面获取最新页码
             response = requests.get(self.base_url, headers=self.headers)
             soup = BeautifulSoup(response.text, 'html.parser')
             
             # 查找页面中的链接
-            links = soup.find_all('a', href=re.compile(r'/pic/MjAyNTAyMjUtMjE\d+'))
+            links = soup.find_all('a', href=re.compile(rf'/pic/{date_code}-\d+'))
             if not links:
-                print("未找到页面链接，使用默认范围")
-                return 217, 212  # 默认范围
+                print("未找到页面链接")
+                return None, None
             
             # 提取页码数字
             page_numbers = []
             for link in links:
-                match = re.search(r'MjAyNTAyMjUtMjE(\d+)', link['href'])
+                match = re.search(rf'{date_code}-(\d+)', link['href'])
                 if match:
                     page_numbers.append(int(match.group(1)))
             
             if not page_numbers:
-                print("未能解析页码，使用默认范围")
-                return 217, 212  # 默认范围
+                print("未能解析页码")
+                return None, None
             
             # 获取最大和最小页码
             start_page = max(page_numbers)
-            end_page = start_page - 5  # 爬取5页
+            end_page = min(page_numbers)
             
             print(f"获取到页面范围: {start_page} 到 {end_page}")
             return start_page, end_page
             
         except Exception as e:
             print(f"获取页面范围时出错: {e}")
-            return 217, 212  # 出错时使用默认范围
+            return None, None
         
     def crawl(self):
         """爬取图片"""
         try:
-            # 获取当天的页面范围
-            start_page, end_page = self.get_page_range()
+            # 创建日期文件夹
+            self.create_folder()
             
+            # 获取页面范围
+            start_page, end_page = self.get_page_range()
+            if start_page is None or end_page is None:
+                print("无法获取页面范围，退出爬取")
+                return
+            
+            # 遍历所有页面
             for page_num in range(start_page, end_page - 1, -1):
                 # 构造页面URL
                 page_url = f"{self.base_url}/MjAyNTAyMjUtMjE{page_num}"
@@ -148,14 +144,14 @@ class ImageCrawler:
                         img_url = 'https:' + img_url if img_url.startswith('//') else 'https://' + img_url
                     
                     if self.download_image(img_url):
-                        time.sleep(random.uniform(1, 2))  # 下载间隔加长，避免被封
+                        time.sleep(random.uniform(1, 2))  # 下载间隔
                 
-                time.sleep(random.uniform(2, 3))  # 页面间隔加长
+                time.sleep(random.uniform(2, 3))  # 页面间隔
                 
         except Exception as e:
             print(f"爬取过程中出错: {e}")
         finally:
-            print(f"\n爬取完成，共下载 {self.image_count} 张图片")
+            print(f"\n爬取完成，共下载 {self.image_count} 张图片到文件夹 {self.current_folder}")
 
 if __name__ == "__main__":
     crawler = ImageCrawler()
