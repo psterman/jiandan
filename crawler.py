@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import time
+import re
 
 class ImageCrawler:
     def __init__(self):
@@ -79,12 +80,46 @@ class ImageCrawler:
             print(f'下载失败 {url}: {str(e)}')
         return False
         
+    def get_page_range(self):
+        """获取当天的页面范围"""
+        try:
+            # 先访问主页面获取最新页码
+            response = requests.get(self.base_url, headers=self.headers)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 查找页面中的链接
+            links = soup.find_all('a', href=re.compile(r'/pic/MjAyNTAyMjUtMjE\d+'))
+            if not links:
+                print("未找到页面链接，使用默认范围")
+                return 217, 212  # 默认范围
+            
+            # 提取页码数字
+            page_numbers = []
+            for link in links:
+                match = re.search(r'MjAyNTAyMjUtMjE(\d+)', link['href'])
+                if match:
+                    page_numbers.append(int(match.group(1)))
+            
+            if not page_numbers:
+                print("未能解析页码，使用默认范围")
+                return 217, 212  # 默认范围
+            
+            # 获取最大和最小页码
+            start_page = max(page_numbers)
+            end_page = start_page - 5  # 爬取5页
+            
+            print(f"获取到页面范围: {start_page} 到 {end_page}")
+            return start_page, end_page
+            
+        except Exception as e:
+            print(f"获取页面范围时出错: {e}")
+            return 217, 212  # 出错时使用默认范围
+        
     def crawl(self):
         """爬取图片"""
         try:
-            # 从217页开始，一直到212页
-            start_page = 217
-            end_page = 212
+            # 获取当天的页面范围
+            start_page, end_page = self.get_page_range()
             
             for page_num in range(start_page, end_page - 1, -1):
                 # 构造页面URL
@@ -95,7 +130,7 @@ class ImageCrawler:
                 if response.status_code != 200:
                     print(f"页面访问失败: {response.status_code}")
                     continue
-                    
+                
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
                 # 找到所有图片链接
