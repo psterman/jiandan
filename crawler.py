@@ -10,6 +10,7 @@ import re
 from base64 import b64decode
 import logging
 import pytz
+import json
 
 # 配置日志
 logging.basicConfig(
@@ -33,12 +34,23 @@ class ImageCrawler:
         logging.info(f"目标日期: {self.yesterday}")
         
         self.base_url = "https://jandan.net/pic"
+        self.session = requests.Session()
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
-            'Referer': 'https://jandan.net/'
+            'Referer': 'https://jandan.net/',
+            'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0'
         }
         self.image_count = 0
         self.current_folder = os.path.join(os.getcwd(), self.yesterday)
@@ -58,8 +70,16 @@ class ImageCrawler:
         try:
             logging.info(f"尝试下载图片: {url}")
             
-            # 直接尝试下载图片，不进行 HEAD 请求
-            response = requests.get(url, headers=self.headers, timeout=10)
+            # 添加随机延迟
+            time.sleep(random.uniform(1, 3))
+            
+            # 设置图片请求的headers
+            img_headers = self.headers.copy()
+            img_headers['Accept'] = 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+            img_headers['Sec-Fetch-Dest'] = 'image'
+            img_headers['Sec-Fetch-Mode'] = 'no-cors'
+            
+            response = self.session.get(url, headers=img_headers, timeout=10)
             if response.status_code != 200:
                 logging.error(f"下载失败，状态码: {response.status_code}")
                 return False
@@ -104,7 +124,7 @@ class ImageCrawler:
             yesterday_start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
             yesterday_end = yesterday_start + timedelta(days=1)
 
-            logging.debug(f"检查时间字符串: {time_str}")
+            logging.info(f"检查时间字符串: {time_str}")
             
             # 处理时间格式
             if '@' in time_str:
@@ -113,11 +133,11 @@ class ImageCrawler:
             if '小时' in time_str:
                 hours = int(re.search(r'(\d+)小时', time_str).group(1))
                 post_time = now - timedelta(hours=hours)
-                logging.debug(f"解析为{hours}小时前，发布时间: {post_time}")
+                logging.info(f"解析为{hours}小时前，发布时间: {post_time}")
             elif '分钟' in time_str:
                 minutes = int(re.search(r'(\d+)分钟', time_str).group(1))
                 post_time = now - timedelta(minutes=minutes)
-                logging.debug(f"解析为{minutes}分钟前，发布时间: {post_time}")
+                logging.info(f"解析为{minutes}分钟前，发布时间: {post_time}")
             else:
                 # 处理具体日期，如 "2024-02-26 10:30:00"
                 try:
@@ -130,10 +150,10 @@ class ImageCrawler:
                         logging.error(f"无法解析时间格式: {time_str}")
                         return False
                 post_time = beijing_tz.localize(post_time)
-                logging.debug(f"解析为具体时间: {post_time}")
+                logging.info(f"解析为具体时间: {post_time}")
 
             is_yesterday = yesterday_start <= post_time < yesterday_end
-            logging.debug(f"是否是昨天的帖子: {is_yesterday}")
+            logging.info(f"是否是昨天的帖子: {is_yesterday}")
             return is_yesterday
             
         except Exception as e:
@@ -144,15 +164,32 @@ class ImageCrawler:
         """获取下一页的URL"""
         try:
             # 查找所有页面链接
+            next_page = None
             page_links = soup.select('.cp-pagenavi a')
+            
+            # 首先查找页码
+            current_page = None
             for link in page_links:
-                if link.get_text().strip() in ['下一页', '前页']:
-                    next_url = link.get('href')
-                    if next_url:
-                        if not next_url.startswith('http'):
-                            next_url = 'https://jandan.net' + next_url
-                        return next_url
+                text = link.get_text().strip()
+                if text.isdigit() and link.get('href') is None:  # 当前页没有href
+                    current_page = int(text)
+                    break
+            
+            if current_page is not None:
+                # 查找下一页链接
+                next_page = str(current_page - 1)  # 煎蛋的页码是倒序的
+                for link in page_links:
+                    if link.get_text().strip() == next_page:
+                        next_url = link.get('href')
+                        if next_url:
+                            if not next_url.startswith('http'):
+                                next_url = 'https://jandan.net' + next_url
+                            logging.info(f"找到下一页URL: {next_url}")
+                            return next_url
+            
+            logging.info("没有找到下一页链接")
             return None
+            
         except Exception as e:
             logging.error(f"获取下一页URL失败: {e}")
             return None
@@ -177,7 +214,10 @@ class ImageCrawler:
                 logging.info(f"正在检查页面: {current_url}")
 
                 try:
-                    response = requests.get(current_url, headers=self.headers)
+                    # 添加随机延迟
+                    time.sleep(random.uniform(2, 4))
+                    
+                    response = self.session.get(current_url, headers=self.headers)
                     if response.status_code != 200:
                         logging.error(f"页面访问失败: {response.status_code}")
                         break
@@ -229,7 +269,6 @@ class ImageCrawler:
                         break
                         
                     current_url = next_url
-                    time.sleep(random.uniform(2, 3))
 
                 except Exception as e:
                     logging.error(f"处理页面出错: {e}")
