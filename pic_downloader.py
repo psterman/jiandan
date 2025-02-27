@@ -9,8 +9,8 @@ import json
 import base64
 
 # 创建保存目录和下载记录文件
-if not os.path.exists('pic2'):
-    os.makedirs('pic2')
+if not os.path.exists('pic4'):
+    os.makedirs('pic4')
 
 # 随机User-Agent列表
 user_agents = [
@@ -51,7 +51,7 @@ def download_image(url, filename):
         # 下载符合条件的图片
         response = requests.get(url, headers=get_random_headers(), timeout=10)
         if response.status_code == 200:
-            with open(os.path.join('pic2', filename), 'wb') as f:
+            with open(os.path.join('pic4', filename), 'wb') as f:
                 f.write(response.content)
             print(f'成功下载: {filename} ({file_size/1024:.1f}KB)')
             return True
@@ -160,21 +160,66 @@ def clean_duplicate_files():
     except Exception as e:
         print(f"清理文件时出错: {e}")
 
+def get_page_suffix(current_page):
+    """获取页面后缀，使用base64编码"""
+    # 构造页码字符串
+    page_str = str(current_page)
+    # 对页码进行base64编码
+    encoded = base64.b64encode(page_str.encode()).decode()
+    return encoded
+
+def analyze_page_pattern(url):
+    """分析页面导航，识别页码规律"""
+    try:
+        response = requests.get(url, headers=get_random_headers())
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 获取页面导航链接
+        nav_links = []
+        for link in soup.find_all('a', href=True):
+            if '/pic/' in link['href']:
+                nav_links.append(link['href'])
+        
+        # 提取页码和对应的URL尾数
+        page_patterns = {}
+        for link in nav_links:
+            # 从URL中提取尾数
+            match = re.search(r'MjAyNTAyMjctMjE([0-9a-z])#comments', link)
+            if match:
+                suffix = match.group(1)
+                # 从链接文本中提取页码
+                page_num = None
+                link_text = link.get_text().strip()
+                if link_text.isdigit():
+                    page_num = int(link_text)
+                    page_patterns[page_num] = suffix
+        
+        print("发现的页码规律：")
+        for page, suffix in sorted(page_patterns.items(), reverse=True):
+            print(f"页码 {page} -> 尾数 {suffix}")
+            
+        return page_patterns
+    except Exception as e:
+        print(f"分析页面规律时出错: {e}")
+    return None
+
 def main():
     # 先清理重复文件并更新index.html
     clean_duplicate_files()
     
-    # 从215页开始，一直到21页
-    current_page = 215  # 从最新页面开始
-    end_page = 21  # 结束页码
+    # 从200页开始，一直到180页
+    current_page = 200  # 从200页开始
+    end_page = 180  # 结束页码
     
     try:
         while current_page >= end_page:
             try:
+                # 获取页面后缀
+                page_suffix = get_page_suffix(current_page)
                 # 修改URL格式以匹配实际页面
-                url = f'https://jandan.net/pic/MjAyNTAyMjUtMjE{current_page}'
+                url = f'https://jandan.net/pic/MjAyNTAyMjct{page_suffix}#comments'
                 print(f"\n正在处理页面: {url}")
-                print(f"当前页码: {current_page}")
+                print(f"当前页码: {current_page} (后缀: {page_suffix})")
                 
                 response = requests.get(url, headers=get_random_headers())
                 soup = BeautifulSoup(response.text, 'html.parser')
@@ -204,7 +249,7 @@ def main():
                         time.sleep(random.uniform(0.5, 1))  # 下载间隔0.5-1秒
                 
                 print(f"完成页面 {current_page}")
-                current_page -= 1
+                current_page -= 1  # 页码递减
                 time.sleep(random.uniform(1, 2))  # 页面间隔1-2秒
                 
             except Exception as e:
