@@ -8,9 +8,24 @@ import time
 from datetime import datetime, timedelta
 import re
 from base64 import b64decode
+import logging
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s: %(message)s',
+    handlers=[
+        logging.FileHandler('crawler.log'),
+        logging.StreamHandler()
+    ]
+)
 
 class ImageCrawler:
     def __init__(self):
+        # 使用UTC时间获取昨天的日期
+        yesterday = datetime.utcnow() - timedelta(days=1)
+        logging.info(f"当前工作目录: {os.getcwd()}")
+        
         self.base_url = "https://jandan.net/pic"
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -20,15 +35,20 @@ class ImageCrawler:
             'Referer': 'https://jandan.net/'
         }
         self.image_count = 0
-        # 获取昨天的日期
-        self.yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
-        self.current_folder = self.yesterday
+        
+        # 使用UTC时间
+        self.yesterday = yesterday.strftime('%Y%m%d')
+        self.current_folder = os.path.join(os.getcwd(), self.yesterday)
         
     def create_folder(self):
         """创建日期文件夹"""
-        os.makedirs(self.current_folder, exist_ok=True)
-        print(f"使用文件夹: {self.current_folder}")
-        return self.current_folder
+        try:
+            os.makedirs(self.current_folder, exist_ok=True)
+            logging.info(f"成功创建文件夹: {self.current_folder}")
+            return self.current_folder
+        except Exception as e:
+            logging.error(f"创建文件夹失败: {e}")
+            return None
         
     def download_image(self, url):
         """下载并保存图片"""
@@ -68,12 +88,11 @@ class ImageCrawler:
         return False
         
     def get_date_code(self):
-        """获取日期编码"""
-        yesterday = datetime.now() - timedelta(days=1)
+        """获取日期编码（UTC）"""
+        yesterday = datetime.utcnow() - timedelta(days=1)
         date_str = yesterday.strftime('%Y%m%d')
-        # 将日期转换为Base64编码
         from base64 import b64encode
-        date_code = b64encode(date_str.encode()).decode().rstrip('=')  # 移除末尾的=号
+        date_code = b64encode(date_str.encode()).decode().rstrip('=')
         return date_code
         
     def get_page_range(self):
@@ -125,8 +144,8 @@ class ImageCrawler:
             return None, None
         
     def get_yesterday_date_range(self):
-        """获取昨天的日期范围"""
-        yesterday = datetime.now() - timedelta(days=1)
+        """获取昨天的日期范围（UTC）"""
+        yesterday = datetime.utcnow() - timedelta(days=1)
         yesterday_start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
         yesterday_end = yesterday_start + timedelta(days=1)
         return yesterday_start, yesterday_end
@@ -191,36 +210,41 @@ class ImageCrawler:
         """爬取图片"""
         try:
             # 创建日期文件夹
-            self.create_folder()
+            folder = self.create_folder()
+            if not folder:
+                logging.error("无法创建文件夹，退出爬取")
+                return
             
             # 获取页面范围
             start_page, _ = self.get_page_range()
             if start_page is None:
-                print("无法获取页面范围，退出爬取")
+                logging.error("无法获取页面范围，退出爬取")
                 return
             
             # 找到第一页
             first_page = self.find_first_page(start_page)
             if first_page is None:
-                print("无法确定第一页，退出爬取")
+                logging.error("无法确定第一页，退出爬取")
                 return
+            
+            logging.info(f"开始爬取从第 {start_page} 页到第 {first_page} 页的图片")
             
             # 遍历所有页面
             date_code = self.get_date_code()
             for page_num in range(start_page, first_page - 1, -1):
                 page_url = f"{self.base_url}/{date_code}-{page_num}"
-                print(f"\n开始爬取页面: {page_url}")
+                logging.info(f"开始爬取页面: {page_url}")
                 
                 response = requests.get(page_url, headers=self.headers)
                 if response.status_code != 200:
-                    print(f"页面访问失败: {response.status_code}")
+                    logging.warning(f"页面访问失败: {response.status_code}")
                     continue
                 
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
                 # 找到所有图片hash
                 img_hashes = soup.select('.text .img-hash')
-                print(f"在页面 {page_num} 中找到 {len(img_hashes)} 个图片链接")
+                logging.info(f"在页面 {page_num} 中找到 {len(img_hashes)} 个图片链接")
                 
                 # 下载图片
                 for img in img_hashes:
@@ -235,15 +259,15 @@ class ImageCrawler:
                                 if self.download_image(img_url):
                                     time.sleep(random.uniform(1, 2))
                         except Exception as e:
-                            print(f"解析图片链接失败: {e}")
+                            logging.error(f"解析图片链接失败: {e}")
                 
                 time.sleep(random.uniform(2, 3))  # 页面间隔
-                
+            
+            logging.info(f"爬取完成，共下载 {self.image_count} 张图片到文件夹 {self.current_folder}")
+            
         except Exception as e:
-            print(f"爬取过程中出错: {e}")
-        finally:
-            print(f"\n爬取完成，共下载 {self.image_count} 张图片到文件夹 {self.current_folder}")
-
+            logging.error(f"爬取过程中出错: {e}")
+        
 if __name__ == "__main__":
     crawler = ImageCrawler()
     crawler.crawl() 
