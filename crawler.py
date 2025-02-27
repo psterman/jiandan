@@ -38,8 +38,7 @@ class ImageCrawler:
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             'Connection': 'keep-alive',
-            'Referer': 'https://jandan.net/',
-            'Cookie': '_ga=GA1.1.123456789.1234567890'  # 添加一个通用的Cookie
+            'Referer': 'https://jandan.net/'
         }
         self.image_count = 0
         self.current_folder = os.path.join(os.getcwd(), self.yesterday)
@@ -141,6 +140,23 @@ class ImageCrawler:
             logging.error(f"解析时间失败: {time_str}, 错误: {e}")
             return False
 
+    def get_next_page_url(self, soup):
+        """获取下一页的URL"""
+        try:
+            # 查找所有页面链接
+            page_links = soup.select('.cp-pagenavi a')
+            for link in page_links:
+                if link.get_text().strip() in ['下一页', '前页']:
+                    next_url = link.get('href')
+                    if next_url:
+                        if not next_url.startswith('http'):
+                            next_url = 'https://jandan.net' + next_url
+                        return next_url
+            return None
+        except Exception as e:
+            logging.error(f"获取下一页URL失败: {e}")
+            return None
+
     def crawl(self):
         """爬取图片"""
         try:
@@ -150,41 +166,25 @@ class ImageCrawler:
                 logging.error("无法创建文件夹，退出爬取")
                 return
 
-            # 获取主页
-            logging.info("开始访问主页...")
-            response = requests.get(self.base_url, headers=self.headers)
-            if response.status_code != 200:
-                logging.error(f"访问主页失败: {response.status_code}")
-                return
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # 获取最新页码
-            latest_page = 1
-            nav = soup.select('.cp-pagenavi a')
-            for a in nav:
-                href = a.get('href', '')
-                if match := re.search(r'/pic/page-(\d+)|/pic/(\d+)', href):
-                    page = int(match.group(1) or match.group(2))
-                    latest_page = max(latest_page, page)
-
-            logging.info(f"开始从第 {latest_page} 页查找昨天的图片")
-
-            # 遍历页面查找昨天的图片
+            # 从主页开始
+            current_url = self.base_url
             found_yesterday = False
-            for page in range(latest_page, 0, -1):
-                page_url = f"{self.base_url}/page-{page}"
-                logging.info(f"正在检查页面: {page_url}")
+            page_count = 0
+            max_pages = 50  # 设置最大页数限制，防止无限循环
+
+            while current_url and page_count < max_pages:
+                page_count += 1
+                logging.info(f"正在检查页面: {current_url}")
 
                 try:
-                    response = requests.get(page_url, headers=self.headers)
+                    response = requests.get(current_url, headers=self.headers)
                     if response.status_code != 200:
-                        logging.warning(f"页面访问失败: {response.status_code}")
-                        continue
+                        logging.error(f"页面访问失败: {response.status_code}")
+                        break
 
                     soup = BeautifulSoup(response.text, 'html.parser')
                     posts = soup.select('.commentlist li')
-                    logging.info(f"在页面 {page} 找到 {len(posts)} 个帖子")
+                    logging.info(f"找到 {len(posts)} 个帖子")
 
                     for post in posts:
                         # 获取发布时间
@@ -222,10 +222,18 @@ class ImageCrawler:
                             logging.info("已完成昨天所有图片的爬取")
                             return
 
+                    # 获取下一页URL
+                    next_url = self.get_next_page_url(soup)
+                    if not next_url:
+                        logging.info("没有下一页了")
+                        break
+                        
+                    current_url = next_url
                     time.sleep(random.uniform(2, 3))
 
                 except Exception as e:
-                    logging.error(f"处理页面 {page} 时出错: {e}")
+                    logging.error(f"处理页面出错: {e}")
+                    break
 
             logging.info(f"爬取完成，共下载 {self.image_count} 张图片到文件夹 {self.current_folder}")
 
