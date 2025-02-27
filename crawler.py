@@ -4,15 +4,11 @@ import random
 from bs4 import BeautifulSoup
 import time
 from datetime import datetime, timedelta
-import re
-from base64 import b64decode, b64encode
+from base64 import b64encode
 import logging
 import pytz
 import base64
 import json
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 # 配置日志
 logging.basicConfig(
@@ -42,13 +38,6 @@ class ImageCrawler:
         self.repo_owner = os.environ.get('GITHUB_REPOSITORY_OWNER')
         self.repo_name = os.environ.get('GITHUB_REPOSITORY').split('/')[-1]
         
-        # 邮件配置
-        self.smtp_server = "smtp.163.com"
-        self.smtp_port = 465
-        self.smtp_user = os.environ.get('SMTP_USER')  # 发件邮箱
-        self.smtp_pass = os.environ.get('SMTP_PASS')  # 邮箱授权码
-        self.notify_emails = ["psterman@163.com", "psterman@gmail.com", "2434775718@qq.com"]
-        
         # 随机User-Agent列表
         self.user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -57,69 +46,6 @@ class ImageCrawler:
         ]
         
         self.image_count = 0
-
-    def send_email_notification(self, repo_size_mb):
-        """发送邮件通知"""
-        try:
-            msg = MIMEMultipart()
-            msg['From'] = self.smtp_user
-            msg['To'] = ', '.join(self.notify_emails)
-            msg['Subject'] = f"仓库空间警告 - {self.repo_name}"
-            
-            body = f"""
-            您的图片仓库 {self.repo_name} 已达到 {repo_size_mb:.2f}MB，
-            即将超过 GitHub 仓库 1GB 的限制。
-            请及时处理，以确保程序正常运行。
-            
-            当前时间：{datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')}
-            """
-            
-            msg.attach(MIMEText(body, 'plain'))
-            
-            # 连接SMTP服务器并发送邮件
-            with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port) as server:
-                server.login(self.smtp_user, self.smtp_pass)
-                server.send_message(msg)
-                
-            logging.info("成功发送邮件通知")
-            return True
-            
-        except Exception as e:
-            logging.error(f"发送邮件失败: {str(e)}")
-            return False
-
-    def get_repo_size(self):
-        """获取仓库大小（MB）"""
-        try:
-            headers = {
-                'Authorization': f'token {self.github_token}',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-            
-            url = f'https://api.github.com/repos/{self.repo_owner}/{self.repo_name}'
-            response = requests.get(url, headers=headers)
-            
-            if response.status_code == 200:
-                repo_data = response.json()
-                size_kb = repo_data.get('size', 0)  # GitHub API 返回的大小单位为KB
-                size_mb = size_kb / 1024  # 转换为MB
-                return size_mb
-            else:
-                logging.error(f"获取仓库大小失败: {response.status_code}")
-                return None
-                
-        except Exception as e:
-            logging.error(f"获取仓库大小出错: {str(e)}")
-            return None
-
-    def check_repo_size(self):
-        """检查仓库大小并在需要时发送通知"""
-        repo_size = self.get_repo_size()
-        if repo_size is not None and repo_size > 900:  # 大于900MB时发送通知
-            logging.warning(f"仓库大小已达到 {repo_size:.2f}MB，发送通知邮件")
-            self.send_email_notification(repo_size)
-            return True
-        return False
 
     def get_random_headers(self):
         """获取随机User-Agent的请求头"""
@@ -214,7 +140,7 @@ class ImageCrawler:
                     self.image_count += 1
                     logging.info(f'成功上传: {file_path} ({file_size/1024:.1f}KB)')
                     return True
-                    
+                
             except Exception as e:
                 logging.error(f'图片处理失败: {str(e)}')
                 return False
@@ -241,14 +167,6 @@ class ImageCrawler:
             if not self.github_token:
                 logging.error("未设置GITHUB_TOKEN环境变量")
                 return
-                
-            if not self.smtp_user or not self.smtp_pass:
-                logging.error("未设置邮箱配置环境变量")
-                return
-            
-            # 检查仓库大小
-            if self.check_repo_size():
-                logging.warning("仓库接近大小限制，请及时处理")
                 
             # 设置页码范围（从最新的页面开始）
             start_page = 219  # 起始页码
@@ -295,9 +213,6 @@ class ImageCrawler:
                     continue
 
             logging.info(f"爬取完成，共上传 {self.image_count} 张图片")
-            
-            # 爬取完成后再次检查仓库大小
-            self.check_repo_size()
 
         except Exception as e:
             logging.error(f"爬取过程中出错: {e}")
