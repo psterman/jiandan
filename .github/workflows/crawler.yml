@@ -14,6 +14,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4.1.1
+      with:
+        fetch-depth: 0  # 获取完整的git历史
     
     - name: Setup Python
       uses: actions/setup-python@v5.0.0
@@ -35,8 +37,10 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: python crawler.py
       
-    - name: Push changes
+    - name: Commit and Push
       run: |
+        git pull origin main --rebase  # 先拉取并rebase远程更改
         git add .
+        git status  # 显示文件状态
         git commit -m "Add images for $(date +'%Y%m%d')" || echo "No changes to commit"
-        git push 
+        git push origin main || git pull --rebase origin main && git push origin main  # 如果push失败，重试一次 
