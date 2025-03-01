@@ -12,10 +12,18 @@ jobs:
       contents: write  # 添加写入权限
     
     steps:
+    - name: Configure Git global settings
+      run: |
+        git config --global http.postBuffer 524288000
+        git config --global core.compression 9
+        git config --global http.lowSpeedLimit 1000
+        git config --global http.lowSpeedTime 300
+    
     - name: Checkout code
       uses: actions/checkout@v4.1.1
       with:
-        fetch-depth: 0  # 获取完整的git历史
+        fetch-depth: 1  # 只获取最新的提交
+        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Setup Python
       uses: actions/setup-python@v5.0.0
@@ -27,10 +35,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4 pytz pillow
         
-    - name: Configure Git
+    - name: Configure Git for commit
       run: |
-        git config --global user.name "GitHub Action"
-        git config --global user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git config --local user.email "action@github.com"
         
     - name: Run crawler
       env:
@@ -39,8 +47,38 @@ jobs:
       
     - name: Commit and Push
       run: |
-        git pull origin main --rebase  # 先拉取并rebase远程更改
+        # 确保我们在正确的分支上
+        git checkout main
+        
+        # 尝试提交更改
         git add .
-        git status  # 显示文件状态
-        git commit -m "Add images for $(date +'%Y%m%d')" || echo "No changes to commit"
-        git push origin main || git pull --rebase origin main && git push origin main  # 如果push失败，重试一次 
+        git status
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Add images for $(date +'%Y%m%d')"
+          
+          # 使用多次重试的方式推送
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Attempting to push changes (attempt $(($RETRY_COUNT + 1)))"
+            
+            if git push origin main; then
+              echo "Successfully pushed changes"
+              break
+            else
+              RETRY_COUNT=$(($RETRY_COUNT + 1))
+              
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Push failed, pulling latest changes and retrying..."
+                git pull --rebase origin main
+                sleep 5
+              else
+                echo "Failed to push after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
+        fi 
